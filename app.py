@@ -74,7 +74,7 @@ if not st.session_state["auth"]:
     if senha == senha_correta:
         st.session_state["auth"] = True
         st.success("Acesso liberado!")
-        st.experimental_rerun()
+        st.rerun()
     else:
         st.stop()
 
