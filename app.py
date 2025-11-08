@@ -84,7 +84,7 @@ if uploaded_file is not None:
     obra_limpa = "".join(c for c in obra if c.isalnum() or c in (" ", "-", "_")).strip()
     arquivo_saida = f"Ceminas - Materiais - {obra_limpa}.xlsx"
     
-    gerar = st.button("⚙️ Gerar Relação de Materiais")
+        gerar = st.button("⚙️ Gerar Relação de Materiais")
 
     if gerar:
         try:
