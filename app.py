@@ -83,10 +83,10 @@ if uploaded_file is not None:
     obra = st.text_input("Nome da obra:", "Nova Obra")
     obra_limpa = "".join(c for c in obra if c.isalnum() or c in (" ", "-", "_")).strip()
     arquivo_saida = f"Ceminas - Materiais - {obra_limpa}.xlsx"
-
+    
     gerar = st.button("⚙️ Gerar Relação de Materiais")
 
-        if gerar:
+    if gerar:
         try:
             # ------------------ Leitura e normalização ------------------
             estruturas = pd.read_excel(banco_estruturas, engine="openpyxl")
@@ -100,12 +100,12 @@ if uploaded_file is not None:
             # Troca NaN/None por vazio (evita "NAN | ..." no selectbox)
             for col in ["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]:
                 estruturas[col] = estruturas[col].fillna("").astype(str)
-                projeto[col]    = projeto[col].fillna("").astype(str)
+                projeto[col] = projeto[col].fillna("").astype(str)
 
             # ------------------ Checagem de combinações ------------------
             keys = ["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]
             chaves_banco = estruturas[keys].drop_duplicates()
-            chaves_proj  = projeto[keys].drop_duplicates()
+            chaves_proj = projeto[keys].drop_duplicates()
 
             faltantes = (
                 chaves_proj.merge(chaves_banco, on=keys, how="left", indicator=True)
@@ -129,10 +129,10 @@ if uploaded_file is not None:
 
                 with st.form("corrigir_faltantes", clear_on_submit=False):
                     for i, row in faltantes.iterrows():
-                        estrutura  = row["ESTRUTURA"]
+                        estrutura = row["ESTRUTURA"]
                         equipamento = row["EQUIPAMENTO"]
-                        condutor   = row["CONDUTOR"]
-                        poste      = row["POSTE"]
+                        condutor = row["CONDUTOR"]
+                        poste = row["POSTE"]
 
                         st.markdown(
                             f"**❌ Estrutura:** {estrutura} | **Equipamento:** {equipamento} | "
@@ -143,7 +143,7 @@ if uploaded_file is not None:
                         sugestoes = (
                             estruturas[estruturas["ESTRUTURA"] == estrutura][["EQUIPAMENTO", "CONDUTOR", "POSTE"]]
                             .drop_duplicates()
-                            .sort_values(by=["EQUIPAMENTO","CONDUTOR","POSTE"], ascending=True)
+                            .sort_values(by=["EQUIPAMENTO", "CONDUTOR", "POSTE"], ascending=True)
                             .reset_index(drop=True)
                         )
 
@@ -164,36 +164,35 @@ if uploaded_file is not None:
                             f"Selecione uma alternativa para {estrutura}:",
                             options=opcoes,
                             index=opcoes.index(escolha_default) if escolha_default in opcoes else 0,
-                            key=key_sel
+                            key=key_sel,
                         )
-                        # Persistência local (visível se você quiser inspecionar)
                         st.session_state["correcoes_choices"][key_sel] = escolha
                         st.divider()
 
                     submitted = st.form_submit_button("✅ Aplicar Correções e Gerar Relação")
 
                 if submitted:
-                    # Monta dicionário de correções e sinaliza para prosseguir
                     correcoes = {}
                     for i, row in faltantes.iterrows():
-                        estrutura  = row["ESTRUTURA"]
+                        estrutura = row["ESTRUTURA"]
                         equipamento = row["EQUIPAMENTO"]
-                        condutor   = row["CONDUTOR"]
-                        poste      = row["POSTE"]
-                        key_sel    = f"choice::{estrutura}::{equipamento}::{condutor}::{poste}::{i}"
-                        escolha    = st.session_state["correcoes_choices"].get(key_sel, "Ignorar esta estrutura")
+                        condutor = row["CONDUTOR"]
+                        poste = row["POSTE"]
+                        key_sel = f"choice::{estrutura}::{equipamento}::{condutor}::{poste}::{i}"
+                        escolha = st.session_state["correcoes_choices"].get(key_sel, "Ignorar esta estrutura")
 
                         if escolha != "Ignorar esta estrutura":
                             eq, cond, pst = [x.strip() for x in escolha.split("|")]
                             correcoes[(estrutura, equipamento, condutor, poste)] = {
-                                "EQUIPAMENTO": eq, "CONDUTOR": cond, "POSTE": pst
+                                "EQUIPAMENTO": eq,
+                                "CONDUTOR": cond,
+                                "POSTE": pst,
                             }
 
                     st.session_state["correcoes_dict"] = correcoes
                     st.session_state["aplicar_correcoes_agora"] = True
                     st.rerun()
                 else:
-                    # Aguarda o submit do form
                     st.stop()
 
             # ------------------ Aplicar correções (se houver) ------------------
@@ -206,36 +205,38 @@ if uploaded_file is not None:
                     if chave in correcoes:
                         novo = correcoes[chave]
                         projeto_corrigido.loc[idx, ["EQUIPAMENTO", "CONDUTOR", "POSTE"]] = [
-                            novo["EQUIPAMENTO"], novo["CONDUTOR"], novo["POSTE"]
+                            novo["EQUIPAMENTO"],
+                            novo["CONDUTOR"],
+                            novo["POSTE"],
                         ]
 
-                # (Opcional) Resumo das correções
                 resumo = []
                 for (est, eqo, cond_o, pst_o), novo in correcoes.items():
-                    resumo.append({
-                        "ESTRUTURA": est,
-                        "EQUIPAMENTO_ORIG": eqo,
-                        "CONDUTOR_ORIG": cond_o,
-                        "POSTE_ORIG": pst_o,
-                        "EQUIPAMENTO_NOVO": novo["EQUIPAMENTO"],
-                        "CONDUTOR_NOVO": novo["CONDUTOR"],
-                        "POSTE_NOVO": novo["POSTE"],
-                    })
+                    resumo.append(
+                        {
+                            "ESTRUTURA": est,
+                            "EQUIPAMENTO_ORIG": eqo,
+                            "CONDUTOR_ORIG": cond_o,
+                            "POSTE_ORIG": pst_o,
+                            "EQUIPAMENTO_NOVO": novo["EQUIPAMENTO"],
+                            "CONDUTOR_NOVO": novo["CONDUTOR"],
+                            "POSTE_NOVO": novo["POSTE"],
+                        }
+                    )
                 if resumo:
                     st.info("🧾 Correções aplicadas:")
                     st.dataframe(pd.DataFrame(resumo), use_container_width=True)
 
-                # Limpa o flag para próximas execuções
                 st.session_state["aplicar_correcoes_agora"] = False
 
             # ------------------ Consolidação final ------------------
             materiais_lista = []
             for _, row in projeto_corrigido.iterrows():
                 flt = (
-                    (estruturas["ESTRUTURA"] == row["ESTRUTURA"]) &
-                    (estruturas["EQUIPAMENTO"] == row["EQUIPAMENTO"]) &
-                    (estruturas["CONDUTOR"] == row["CONDUTOR"]) &
-                    (estruturas["POSTE"] == row["POSTE"])
+                    (estruturas["ESTRUTURA"] == row["ESTRUTURA"])
+                    & (estruturas["EQUIPAMENTO"] == row["EQUIPAMENTO"])
+                    & (estruturas["CONDUTOR"] == row["CONDUTOR"])
+                    & (estruturas["POSTE"] == row["POSTE"])
                 )
                 encontrados = estruturas.loc[flt].copy()
                 if not encontrados.empty:
@@ -259,13 +260,10 @@ if uploaded_file is not None:
                     label="📥 Baixar planilha gerada",
                     data=buffer.getvalue(),
                     file_name=arquivo_saida,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
                 st.warning("⚠️ Nenhuma estrutura válida encontrada para geração da relação.")
-
-        except Exception as e:
-            st.error(f"❌ Ocorreu um erro: {e}")
 
         except Exception as e:
             st.error(f"❌ Ocorreu um erro: {e}")
