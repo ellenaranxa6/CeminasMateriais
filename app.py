@@ -104,11 +104,8 @@ if uploaded_file is not None:
 
     gerar = st.button("Gerar Relação de Materiais")
 
-    if gerar:
+        if gerar:
         try:
-            # -------------------------------------------------
-            # Leitura das planilhas
-            # -------------------------------------------------
             estruturas = pd.read_excel(banco_estruturas, engine="openpyxl")
             projeto = pd.read_excel(projeto_path, engine="openpyxl")
 
@@ -118,11 +115,70 @@ if uploaded_file is not None:
                 for col in df.select_dtypes(include=["object"]).columns:
                     df[col] = df[col].astype(str).str.strip().str.upper()
 
-            # -------------------------------------------------
-            # Geração da relação consolidada
-            # -------------------------------------------------
+            # Combinações existentes
+            chaves_banco = estruturas[["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]].drop_duplicates()
+            chaves_proj = projeto[["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]].drop_duplicates()
+
+            # Detecta combinações não encontradas
+            faltantes = pd.merge(
+                chaves_proj, chaves_banco,
+                on=["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"],
+                how="left", indicator=True
+            ).query('_merge == "left_only"').drop(columns="_merge")
+
+            correcoes = {}
+
+            if not faltantes.empty:
+                st.warning(f"⚠️ Foram encontradas {len(faltantes)} combinações inexistentes no banco.")
+                st.markdown("Por favor, selecione abaixo como tratar cada uma:")
+
+                for i, row in faltantes.iterrows():
+                    estrutura = row["ESTRUTURA"]
+                    equipamento = row["EQUIPAMENTO"]
+                    condutor = row["CONDUTOR"]
+                    poste = row["POSTE"]
+
+                    st.markdown(f"**❌ Estrutura:** {estrutura} | **Equipamento:** {equipamento} | **Condutor:** {condutor} | **Poste:** {poste}")
+
+                    # Sugestões disponíveis dessa estrutura
+                    sugestoes = estruturas[estruturas["ESTRUTURA"] == estrutura][["EQUIPAMENTO", "CONDUTOR", "POSTE"]].drop_duplicates()
+
+                    if sugestoes.empty:
+                        st.info("🔹 Nenhuma variação cadastrada dessa estrutura — será ignorada.")
+                        continue
+
+                    opcoes = [f"{r['EQUIPAMENTO']} | {r['CONDUTOR']} | {r['POSTE']}" for _, r in sugestoes.iterrows()]
+                    escolha = st.selectbox(
+                        f"Selecione uma alternativa para {estrutura}:",
+                        options=["Ignorar esta estrutura"] + opcoes,
+                        key=f"alt_{i}"
+                    )
+
+                    if escolha != "Ignorar esta estrutura":
+                        eq, cond, pst = [x.strip() for x in escolha.split("|")]
+                        correcoes[(estrutura, equipamento, condutor, poste)] = {"EQUIPAMENTO": eq, "CONDUTOR": cond, "POSTE": pst}
+                    st.divider()
+
+                aplicar = st.button("✅ Aplicar Correções e Gerar Relação")
+
+                if not aplicar:
+                    st.stop()
+            else:
+                st.success("✅ Todas as combinações do projeto estão no banco de dados.")
+
+            # Aplica correções ao projeto
+            projeto_corrigido = projeto.copy()
+            for idx, row in projeto.iterrows():
+                chave = (row["ESTRUTURA"], row["EQUIPAMENTO"], row["CONDUTOR"], row["POSTE"])
+                if chave in correcoes:
+                    novo = correcoes[chave]
+                    projeto_corrigido.loc[idx, ["EQUIPAMENTO", "CONDUTOR", "POSTE"]] = [
+                        novo["EQUIPAMENTO"], novo["CONDUTOR"], novo["POSTE"]
+                    ]
+
+            # --- Consolidação final ---
             materiais_lista = []
-            for _, row in projeto.iterrows():
+            for _, row in projeto_corrigido.iterrows():
                 filtro = (
                     (estruturas["ESTRUTURA"] == row["ESTRUTURA"]) &
                     (estruturas["EQUIPAMENTO"] == row["EQUIPAMENTO"]) &
@@ -144,21 +200,18 @@ if uploaded_file is not None:
                     .sort_values("DESCRIÇÃO")
                 )
 
-                # -------------------------------------------------
-                # Download do arquivo
-                # -------------------------------------------------
+                # Download final
                 buffer = BytesIO()
                 relacao.to_excel(buffer, index=False)
-                st.success(f"Relação consolidada gerada para: {obra}")
+                st.success(f"✅ Relação consolidada gerada com sucesso para {obra}")
                 st.download_button(
-                    label="Baixar planilha gerada",
+                    label="📥 Baixar planilha gerada",
                     data=buffer.getvalue(),
-                    file_name=arquivo_saida,
+                    file_name=f"Ceminas - Materiais - {obra_limpa}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
             else:
-                st.warning("Nenhuma estrutura válida encontrada no banco de dados.")
+                st.warning("⚠️ Nenhuma estrutura válida encontrada para geração da relação.")
 
         except Exception as e:
             st.error(f"Ocorreu um erro: {e}")
