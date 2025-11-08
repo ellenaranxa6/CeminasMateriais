@@ -12,7 +12,7 @@ Original file is located at
 # Interface Web Interativa (Streamlit Cloud)
 # ---------------------------------------------------------
 # Autor: Ellen Lousada / Engenharia Ceminas
-# Versão: 2025.11 (Deploy Cloud)
+# Versão: 2025.11 (Deploy Cloud - Visual Final)
 # =========================================================
 
 import streamlit as st
@@ -25,22 +25,24 @@ from io import BytesIO
 # ---------------------------------------------------------
 st.set_page_config(page_title="Ceminas - Lista de Materiais", page_icon="⚡", layout="centered")
 
-# Cabeçalho estilizado
+# Aplica CSS com o novo fundo azul-claro e estilos gerais
 st.markdown("""
     <style>
         .main {
-            background-color: #f8f9fa;
+            background-color: #E6F0FF;
         }
         .title {
             text-align: center;
-            font-size: 34px;
-            font-weight: 700;
+            font-size: 36px;
+            font-weight: 800;
             color: #003366;
+            margin-top: 10px;
         }
         .subtitle {
             text-align: center;
             font-size: 18px;
-            color: #666;
+            color: #333;
+            margin-bottom: 30px;
         }
         .stButton>button {
             background-color: #003366;
@@ -48,6 +50,7 @@ st.markdown("""
             font-weight: bold;
             border-radius: 8px;
             padding: 0.6em 1.2em;
+            transition: 0.3s;
         }
         .stButton>button:hover {
             background-color: #0059b3;
@@ -56,9 +59,18 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="title">⚡ Ceminas – Gerador de Relação de Materiais</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Ferramenta interna para consolidação de materiais de redes de distribuição</div>', unsafe_allow_html=True)
+# ---------------------------------------------------------
+# LOGOTIPO
+# ---------------------------------------------------------
+# Substitua pelo caminho exato do arquivo no repositório
+logo_path = "Logo Ceminas.jpeg"
+if os.path.exists(logo_path):
+    st.image(logo_path, use_column_width=False, width=250)
+else:
+    st.warning("Logotipo não encontrado no diretório do app.")
 
+st.markdown('<div class="title">CEMINAS – Gerador de Relação de Materiais</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Ferramenta interna para consolidação de materiais de redes de distribuição</div>', unsafe_allow_html=True)
 st.divider()
 
 # ---------------------------------------------------------
@@ -81,11 +93,11 @@ if not st.session_state["auth"]:
 # ---------------------------------------------------------
 # UPLOAD DO ARQUIVO E PROCESSAMENTO
 # ---------------------------------------------------------
-st.header("Enviar planilha de estruturas do projeto")
+st.header("📤 Enviar planilha de estruturas do projeto")
 
 uploaded_file = st.file_uploader("Envie o arquivo **EstruturasProjeto.xlsx**", type=["xlsx"])
 
-banco_estruturas = "MateriaisEstrutura.xlsx"  # Deve estar no mesmo repositório ou pasta
+banco_estruturas = "MateriaisEstrutura.xlsx"  # Banco principal no repositório
 
 if uploaded_file is not None:
     st.success("Arquivo recebido com sucesso!")
@@ -102,10 +114,13 @@ if uploaded_file is not None:
     obra_limpa = "".join(c for c in obra if c.isalnum() or c in (" ", "-", "_")).strip()
     arquivo_saida = f"Ceminas - Materiais - {obra_limpa}.xlsx"
 
-    gerar = st.button("Gerar Relação de Materiais")
+    gerar = st.button("⚙️ Gerar Relação de Materiais")
 
-        if gerar:
+    if gerar:
         try:
+            # -------------------------------------------------
+            # Leitura das planilhas
+            # -------------------------------------------------
             estruturas = pd.read_excel(banco_estruturas, engine="openpyxl")
             projeto = pd.read_excel(projeto_path, engine="openpyxl")
 
@@ -129,7 +144,7 @@ if uploaded_file is not None:
             correcoes = {}
 
             if not faltantes.empty:
-                st.warning(f"⚠️ Foram encontradas {len(faltantes)} combinações inexistentes no banco.")
+                st.warning(f"Foram encontradas {len(faltantes)} combinações inexistentes no banco.")
                 st.markdown("Por favor, selecione abaixo como tratar cada uma:")
 
                 for i, row in faltantes.iterrows():
@@ -138,7 +153,7 @@ if uploaded_file is not None:
                     condutor = row["CONDUTOR"]
                     poste = row["POSTE"]
 
-                    st.markdown(f"**❌ Estrutura:** {estrutura} | **Equipamento:** {equipamento} | **Condutor:** {condutor} | **Poste:** {poste}")
+                    st.markdown(f"**Estrutura:** {estrutura} | **Equipamento:** {equipamento} | **Condutor:** {condutor} | **Poste:** {poste}")
 
                     # Sugestões disponíveis dessa estrutura
                     sugestoes = estruturas[estruturas["ESTRUTURA"] == estrutura][["EQUIPAMENTO", "CONDUTOR", "POSTE"]].drop_duplicates()
@@ -159,12 +174,12 @@ if uploaded_file is not None:
                         correcoes[(estrutura, equipamento, condutor, poste)] = {"EQUIPAMENTO": eq, "CONDUTOR": cond, "POSTE": pst}
                     st.divider()
 
-                aplicar = st.button("✅ Aplicar Correções e Gerar Relação")
+                aplicar = st.button("Aplicar Correções e Gerar Relação")
 
                 if not aplicar:
                     st.stop()
             else:
-                st.success("✅ Todas as combinações do projeto estão no banco de dados.")
+                st.success("Todas as combinações do projeto estão no banco de dados.")
 
             # Aplica correções ao projeto
             projeto_corrigido = projeto.copy()
@@ -203,15 +218,15 @@ if uploaded_file is not None:
                 # Download final
                 buffer = BytesIO()
                 relacao.to_excel(buffer, index=False)
-                st.success(f"✅ Relação consolidada gerada com sucesso para {obra}")
+                st.success(f"Relação consolidada gerada com sucesso para {obra}")
                 st.download_button(
-                    label="📥 Baixar planilha gerada",
+                    label="Baixar planilha gerada",
                     data=buffer.getvalue(),
                     file_name=f"Ceminas - Materiais - {obra_limpa}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                st.warning("⚠️ Nenhuma estrutura válida encontrada para geração da relação.")
+                st.warning("Nenhuma estrutura válida encontrada para geração da relação.")
 
         except Exception as e:
             st.error(f"Ocorreu um erro: {e}")
