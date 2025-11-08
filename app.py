@@ -15,10 +15,12 @@ Original file is located at
 # =========================================================
 
 import streamlit as st
-st.write("✅ App inicializado com sucesso (debug checkpoint 1)")
 import pandas as pd
 import os
 from io import BytesIO
+
+# ⚙️ Configuração de página deve ser o PRIMEIRO comando Streamlit
+st.set_page_config(page_title="Ceminas - Lista de Materiais", page_icon="⚡", layout="centered")
 
 # --------------------- Config página + estilo ---------------------
 st.set_page_config(page_title="Ceminas - Lista de Materiais", page_icon="⚡", layout="centered")
