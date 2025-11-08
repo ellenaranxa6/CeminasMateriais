@@ -11,7 +11,7 @@ Original file is located at
 # Interface Web Interativa (Streamlit Cloud)
 # ---------------------------------------------------------
 # Autor: Ellen Lousada / Engenharia Ceminas
-# Versão: 2025.11 (Deploy Cloud - Revisão Final)
+# Versão: 2025.11 (Fluxo com estado persistente)
 # =========================================================
 
 import streamlit as st
@@ -19,48 +19,35 @@ import pandas as pd
 import os
 from io import BytesIO
 
-# ---------------------------------------------------------
-# CONFIGURAÇÃO DE PÁGINA E ESTILO VISUAL
-# ---------------------------------------------------------
+# --------------------- Config página + estilo ---------------------
 st.set_page_config(page_title="Ceminas - Lista de Materiais", page_icon="⚡", layout="centered")
-
 st.markdown("""
     <style>
         .main { background-color: #E6F0FF; }
         .title { text-align: center; font-size: 36px; font-weight: 800; color: #003366; margin-top: 10px; }
         .subtitle { text-align: center; font-size: 18px; color: #333; margin-bottom: 30px; }
         .stButton>button {
-            background-color: #003366;
-            color: #fff;
-            font-weight: 700;
-            border-radius: 8px;
-            padding: .6em 1.2em;
-            transition: 0.3s;
+            background-color: #003366; color: #fff; font-weight: 700;
+            border-radius: 8px; padding: .6em 1.2em; transition: 0.3s;
         }
         .stButton>button:hover { background-color: #0059b3; color: #fff; }
     </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# LOGOTIPO
-# ---------------------------------------------------------
+# --------------------- Logo ---------------------
 logo_path = "Logo Ceminas.jpeg"
 if os.path.exists(logo_path):
     st.image(logo_path, use_column_width=False, width=250)
 else:
-    st.warning("⚠️ Logotipo não encontrado no diretório do app (Logo Ceminas.jpeg).")
-
+    st.warning("⚠️ Logotipo não encontrado (Logo Ceminas.jpeg).")
 st.markdown('<div class="title">CEMINAS – Gerador de Relação de Materiais</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Ferramenta interna para consolidação de materiais de redes de distribuição</div>', unsafe_allow_html=True)
 st.divider()
 
-# ---------------------------------------------------------
-# AUTENTICAÇÃO BÁSICA (SENHA)
-# ---------------------------------------------------------
+# --------------------- Autenticação simples ---------------------
 senha_correta = "Ceminas2025"
 if "auth" not in st.session_state:
     st.session_state["auth"] = False
-
 if not st.session_state["auth"]:
     senha = st.text_input("🔐 Digite a senha de acesso:", type="password")
     if senha == senha_correta:
@@ -70,34 +57,45 @@ if not st.session_state["auth"]:
     else:
         st.stop()
 
-# ---------------------------------------------------------
-# UPLOAD DO ARQUIVO E PROCESSAMENTO
-# ---------------------------------------------------------
+# --------------------- Estado global do fluxo ---------------------
+# Flags para controlar as fases (evita depender do estado do botão após rerun)
+st.session_state.setdefault("pending_generate", False)        # queremos gerar agora?
+st.session_state.setdefault("corrections_submitted", False)   # correções foram submetidas?
+st.session_state.setdefault("correcoes_dict", {})             # dicionário de correções
+st.session_state.setdefault("correcoes_choices", {})          # escolhas do selectbox
+st.session_state.setdefault("obra", "Nova Obra")              # nome da obra persistente
+
+# --------------------- Upload ---------------------
 st.header("📤 Enviar planilha de estruturas do projeto")
 uploaded_file = st.file_uploader("Envie o arquivo **EstruturasProjeto.xlsx**", type=["xlsx"])
 
-banco_estruturas = "MateriaisEstrutura.xlsx"  # Banco principal no repositório
+banco_estruturas = "MateriaisEstrutura.xlsx"  # precisa existir no repositório
 
 if uploaded_file is not None:
     st.success("✅ Arquivo recebido com sucesso!")
-
-    # Salva o arquivo temporariamente
     projeto_path = "EstruturasProjeto.xlsx"
     with open(projeto_path, "wb") as f:
         f.write(uploaded_file.read())
 
     st.divider()
     st.header("🏗️ Configuração da Obra")
-
-    obra = st.text_input("Nome da obra:", "Nova Obra")
-    obra_limpa = "".join(c for c in obra if c.isalnum() or c in (" ", "-", "_")).strip()
+    st.session_state["obra"] = st.text_input("Nome da obra:", st.session_state["obra"])
+    obra_limpa = "".join(c for c in st.session_state["obra"] if c.isalnum() or c in (" ", "-", "_")).strip()
     arquivo_saida = f"Ceminas - Materiais - {obra_limpa}.xlsx"
 
-    gerar = st.button("⚙️ Gerar Relação de Materiais")
+    # Botão para iniciar validação + geração
+    iniciar = st.button("⚙️ Validar e Gerar Relação")
+    if iniciar:
+        st.session_state["pending_generate"] = True
+        st.session_state["corrections_submitted"] = False  # reinicia passo de correção
+        st.session_state["correcoes_dict"] = {}
+        st.session_state["correcoes_choices"] = {}
+        st.rerun()
 
-    if gerar:
+    # Se devemos gerar (seja por clique, seja após envio do form), processa:
+    if st.session_state["pending_generate"]:
         try:
-            # ------------------ Leitura e normalização ------------------
+            # ---------- Leitura e normalização ----------
             estruturas = pd.read_excel(banco_estruturas, engine="openpyxl")
             projeto = pd.read_excel(projeto_path, engine="openpyxl")
 
@@ -106,15 +104,14 @@ if uploaded_file is not None:
                 for col in df.select_dtypes(include=["object"]).columns:
                     df[col] = df[col].astype(str).str.strip().str.upper()
 
-            # Evita "NAN" nas opções
+            # Evita "NAN" nas opções:
             for col in ["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]:
                 estruturas[col] = estruturas[col].fillna("").astype(str)
-                projeto[col] = projeto[col].fillna("").astype(str)
+                projeto[col]    = projeto[col].fillna("").astype(str)
 
-            # ------------------ Checagem de combinações ------------------
             keys = ["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]
             chaves_banco = estruturas[keys].drop_duplicates()
-            chaves_proj = projeto[keys].drop_duplicates()
+            chaves_proj  = projeto[keys].drop_duplicates()
 
             faltantes = (
                 chaves_proj.merge(chaves_banco, on=keys, how="left", indicator=True)
@@ -123,41 +120,35 @@ if uploaded_file is not None:
                 .reset_index(drop=True)
             )
 
-            # Inicializa variáveis de sessão
-            if "correcoes_choices" not in st.session_state:
-                st.session_state["correcoes_choices"] = {}
-            if "aplicar_correcoes_agora" not in st.session_state:
-                st.session_state["aplicar_correcoes_agora"] = False
-            if "correcoes_dict" not in st.session_state:
-                st.session_state["correcoes_dict"] = {}
-
-            # ------------------ Etapa de correção interativa ------------------
-            if len(faltantes) > 0 and not st.session_state["aplicar_correcoes_agora"]:
+            # ---------- Etapa de Correção (se necessário e ainda não submetida) ----------
+            if len(faltantes) > 0 and not st.session_state["corrections_submitted"]:
                 st.warning(f"⚠️ Foram encontradas {len(faltantes)} combinações inexistentes no banco.")
                 st.markdown("Selecione abaixo como tratar cada uma:")
 
                 with st.form("corrigir_faltantes", clear_on_submit=False):
                     for i, row in faltantes.iterrows():
-                        estrutura = row["ESTRUTURA"]
+                        estrutura  = row["ESTRUTURA"]
                         equipamento = row["EQUIPAMENTO"]
-                        condutor = row["CONDUTOR"]
-                        poste = row["POSTE"]
+                        condutor   = row["CONDUTOR"]
+                        poste      = row["POSTE"]
 
                         st.markdown(
                             f"**❌ Estrutura:** {estrutura} | **Equipamento:** {equipamento} | "
                             f"**Condutor:** {condutor} | **Poste:** {poste}"
                         )
 
-                        # Sugestões da mesma estrutura
+                        # Sugestões cadastradas na MESMA estrutura
                         sugestoes = (
                             estruturas[estruturas["ESTRUTURA"] == estrutura][["EQUIPAMENTO", "CONDUTOR", "POSTE"]]
                             .drop_duplicates()
-                            .sort_values(by=["EQUIPAMENTO", "CONDUTOR", "POSTE"], ascending=True)
+                            .sort_values(by=["EQUIPAMENTO","CONDUTOR","POSTE"])
                             .reset_index(drop=True)
                         )
 
                         if sugestoes.empty:
                             st.info("🔹 Nenhuma variação cadastrada dessa estrutura — ela será ignorada.")
+                            # Mesmo sem opções, seguimos adiante (ignorar)
+                            st.divider()
                             continue
 
                         opcoes = ["Ignorar esta estrutura"] + [
@@ -181,64 +172,57 @@ if uploaded_file is not None:
                     submitted = st.form_submit_button("✅ Aplicar Correções e Gerar Relação")
 
                 if submitted:
+                    # Monta dicionário de correções e segue para geração sem precisar clicar de novo
                     correcoes = {}
                     for i, row in faltantes.iterrows():
-                        estrutura = row["ESTRUTURA"]
+                        estrutura  = row["ESTRUTURA"]
                         equipamento = row["EQUIPAMENTO"]
-                        condutor = row["CONDUTOR"]
-                        poste = row["POSTE"]
-                        key_sel = f"choice::{estrutura}::{equipamento}::{condutor}::{poste}::{i}"
-                        escolha = st.session_state["correcoes_choices"].get(key_sel, "Ignorar esta estrutura")
-
+                        condutor   = row["CONDUTOR"]
+                        poste      = row["POSTE"]
+                        key_sel    = f"choice::{estrutura}::{equipamento}::{condutor}::{poste}::{i}"
+                        escolha    = st.session_state["correcoes_choices"].get(key_sel, "Ignorar esta estrutura")
                         if escolha != "Ignorar esta estrutura":
                             eq, cond, pst = [x.strip() for x in escolha.split("|")]
                             correcoes[(estrutura, equipamento, condutor, poste)] = {
-                                "EQUIPAMENTO": eq,
-                                "CONDUTOR": cond,
-                                "POSTE": pst,
+                                "EQUIPAMENTO": eq, "CONDUTOR": cond, "POSTE": pst
                             }
 
                     st.session_state["correcoes_dict"] = correcoes
-                    st.session_state["aplicar_correcoes_agora"] = True
+                    st.session_state["corrections_submitted"] = True
                     st.rerun()
                 else:
+                    # Espera submissão do form
                     st.stop()
 
-            # ------------------ Aplicar correções ------------------
+            # ---------- Aplicar correções (se houver) ----------
             correcoes = st.session_state.get("correcoes_dict", {})
             projeto_corrigido = projeto.copy()
-
             if correcoes:
                 for idx, row in projeto.iterrows():
                     chave = (row["ESTRUTURA"], row["EQUIPAMENTO"], row["CONDUTOR"], row["POSTE"])
                     if chave in correcoes:
                         novo = correcoes[chave]
                         projeto_corrigido.loc[idx, ["EQUIPAMENTO", "CONDUTOR", "POSTE"]] = [
-                            novo["EQUIPAMENTO"],
-                            novo["CONDUTOR"],
-                            novo["POSTE"],
+                            novo["EQUIPAMENTO"], novo["CONDUTOR"], novo["POSTE"]
                         ]
 
+                # (opcional) resumo visual das correções
                 resumo = []
                 for (est, eqo, cond_o, pst_o), novo in correcoes.items():
-                    resumo.append(
-                        {
-                            "ESTRUTURA": est,
-                            "EQUIPAMENTO_ORIG": eqo,
-                            "CONDUTOR_ORIG": cond_o,
-                            "POSTE_ORIG": pst_o,
-                            "EQUIPAMENTO_NOVO": novo["EQUIPAMENTO"],
-                            "CONDUTOR_NOVO": novo["CONDUTOR"],
-                            "POSTE_NOVO": novo["POSTE"],
-                        }
-                    )
+                    resumo.append({
+                        "ESTRUTURA": est,
+                        "EQUIPAMENTO_ORIG": eqo,
+                        "CONDUTOR_ORIG": cond_o,
+                        "POSTE_ORIG": pst_o,
+                        "EQUIPAMENTO_NOVO": novo["EQUIPAMENTO"],
+                        "CONDUTOR_NOVO": novo["CONDUTOR"],
+                        "POSTE_NOVO": novo["POSTE"],
+                    })
                 if resumo:
                     st.info("🧾 Correções aplicadas:")
                     st.dataframe(pd.DataFrame(resumo), use_container_width=True)
 
-                st.session_state["aplicar_correcoes_agora"] = False
-
-            # ------------------ Consolidação final ------------------
+            # ---------- Consolidação final ----------
             materiais_lista = []
             for _, row in projeto_corrigido.iterrows():
                 flt = (
@@ -255,7 +239,6 @@ if uploaded_file is not None:
             if materiais_lista:
                 materiais = pd.concat(materiais_lista, ignore_index=True)
                 materiais["QTD_TOTAL"] = materiais["QUANTIDADE"] * materiais["QTD_PROJETO"]
-
                 relacao = (
                     materiais.groupby(["CODIGO", "DESCRIÇÃO", "UNIDADE"], as_index=False)["QTD_TOTAL"]
                     .sum()
@@ -264,15 +247,31 @@ if uploaded_file is not None:
 
                 buffer = BytesIO()
                 relacao.to_excel(buffer, index=False)
-                st.success(f"✅ Relação consolidada gerada com sucesso para {obra}")
+                st.success(f"✅ Relação consolidada gerada com sucesso para {st.session_state['obra']}")
                 st.download_button(
                     label="📥 Baixar planilha gerada",
                     data=buffer.getvalue(),
                     file_name=arquivo_saida,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+
+                # Reset para um novo ciclo (não “volta ao início”, apenas limpa flags)
+                st.session_state["pending_generate"] = False
+                st.session_state["corrections_submitted"] = False
+                st.session_state["correcoes_dict"] = {}
+                st.session_state["correcoes_choices"] = {}
             else:
                 st.warning("⚠️ Nenhuma estrutura válida encontrada para geração da relação.")
+                # Permanece em pending_generate=False para permitir nova ação do usuário
+                st.session_state["pending_generate"] = False
+                st.session_state["corrections_submitted"] = False
+                st.session_state["correcoes_dict"] = {}
+                st.session_state["correcoes_choices"] = {}
 
         except Exception as e:
             st.error(f"❌ Ocorreu um erro: {e}")
+            # Reset em caso de exceção
+            st.session_state["pending_generate"] = False
+            st.session_state["corrections_submitted"] = False
+            st.session_state["correcoes_dict"] = {}
+            st.session_state["correcoes_choices"] = {}
