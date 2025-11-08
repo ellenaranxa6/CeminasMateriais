@@ -86,7 +86,7 @@ if uploaded_file is not None:
 
     gerar = st.button("⚙️ Gerar Relação de Materiais")
 
-    if gerar:
+        if gerar:
         try:
             # ------------------ Leitura e normalização ------------------
             estruturas = pd.read_excel(banco_estruturas, engine="openpyxl")
@@ -97,41 +97,53 @@ if uploaded_file is not None:
                 for col in df.select_dtypes(include=["object"]).columns:
                     df[col] = df[col].astype(str).str.strip().str.upper()
 
+            # Troca NaN/None por vazio (evita "NAN | ..." no selectbox)
+            for col in ["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]:
+                estruturas[col] = estruturas[col].fillna("").astype(str)
+                projeto[col]    = projeto[col].fillna("").astype(str)
+
             # ------------------ Checagem de combinações ------------------
             keys = ["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]
             chaves_banco = estruturas[keys].drop_duplicates()
-            chaves_proj = projeto[keys].drop_duplicates()
+            chaves_proj  = projeto[keys].drop_duplicates()
 
             faltantes = (
                 chaves_proj.merge(chaves_banco, on=keys, how="left", indicator=True)
                 .query('_merge == "left_only"')
                 .drop(columns="_merge")
+                .reset_index(drop=True)
             )
 
-            # Preparar session_state para escolhas
+            # Estado de sessão para escolhas e acionamento
             if "correcoes_choices" not in st.session_state:
                 st.session_state["correcoes_choices"] = {}
+            if "aplicar_correcoes_agora" not in st.session_state:
+                st.session_state["aplicar_correcoes_agora"] = False
+            if "correcoes_dict" not in st.session_state:
+                st.session_state["correcoes_dict"] = {}
 
-            correcoes = {}
-
-            if not faltantes.empty:
+            # ------------------ Etapa de correção interativa ------------------
+            if len(faltantes) > 0 and not st.session_state["aplicar_correcoes_agora"]:
                 st.warning(f"⚠️ Foram encontradas {len(faltantes)} combinações inexistentes no banco.")
                 st.markdown("Selecione abaixo como tratar cada uma:")
 
                 with st.form("corrigir_faltantes", clear_on_submit=False):
-                    for i, row in faltantes.reset_index(drop=True).iterrows():
-                        estrutura = row["ESTRUTURA"]
+                    for i, row in faltantes.iterrows():
+                        estrutura  = row["ESTRUTURA"]
                         equipamento = row["EQUIPAMENTO"]
-                        condutor = row["CONDUTOR"]
-                        poste = row["POSTE"]
+                        condutor   = row["CONDUTOR"]
+                        poste      = row["POSTE"]
 
                         st.markdown(
-                            f"**❌ Estrutura:** {estrutura} | **Equipamento:** {equipamento} | **Condutor:** {condutor} | **Poste:** {poste}"
+                            f"**❌ Estrutura:** {estrutura} | **Equipamento:** {equipamento} | "
+                            f"**Condutor:** {condutor} | **Poste:** {poste}"
                         )
 
+                        # Sugestões disponíveis dessa MESMA estrutura
                         sugestoes = (
                             estruturas[estruturas["ESTRUTURA"] == estrutura][["EQUIPAMENTO", "CONDUTOR", "POSTE"]]
                             .drop_duplicates()
+                            .sort_values(by=["EQUIPAMENTO","CONDUTOR","POSTE"], ascending=True)
                             .reset_index(drop=True)
                         )
 
@@ -142,47 +154,52 @@ if uploaded_file is not None:
                         opcoes = ["Ignorar esta estrutura"] + [
                             f"{r['EQUIPAMENTO']} | {r['CONDUTOR']} | {r['POSTE']}"
                             for _, r in sugestoes.iterrows()
+                            if f"{r['EQUIPAMENTO']}{r['CONDUTOR']}{r['POSTE']}".strip() != ""
                         ]
 
-                        key_sel = f"choice_{estrutura}_{equipamento}_{condutor}_{poste}_{i}"
-                        default_val = st.session_state["correcoes_choices"].get(key_sel, opcoes[0])
+                        key_sel = f"choice::{estrutura}::{equipamento}::{condutor}::{poste}::{i}"
+                        escolha_default = st.session_state["correcoes_choices"].get(key_sel, opcoes[0])
 
                         escolha = st.selectbox(
                             f"Selecione uma alternativa para {estrutura}:",
                             options=opcoes,
-                            key=key_sel,
-                            index=opcoes.index(default_val) if default_val in opcoes else 0,
+                            index=opcoes.index(escolha_default) if escolha_default in opcoes else 0,
+                            key=key_sel
                         )
-
-                        # Persistir a escolha no estado
+                        # Persistência local (visível se você quiser inspecionar)
                         st.session_state["correcoes_choices"][key_sel] = escolha
                         st.divider()
 
                     submitted = st.form_submit_button("✅ Aplicar Correções e Gerar Relação")
 
-                # Se o formulário foi submetido, montar o dicionário de correções
-                if not faltantes.empty and submitted:
-                    for i, row in faltantes.reset_index(drop=True).iterrows():
-                        estrutura = row["ESTRUTURA"]
+                if submitted:
+                    # Monta dicionário de correções e sinaliza para prosseguir
+                    correcoes = {}
+                    for i, row in faltantes.iterrows():
+                        estrutura  = row["ESTRUTURA"]
                         equipamento = row["EQUIPAMENTO"]
-                        condutor = row["CONDUTOR"]
-                        poste = row["POSTE"]
-                        key_sel = f"choice_{estrutura}_{equipamento}_{condutor}_{poste}_{i}"
-                        escolha = st.session_state["correcoes_choices"].get(key_sel, "Ignorar esta estrutura")
+                        condutor   = row["CONDUTOR"]
+                        poste      = row["POSTE"]
+                        key_sel    = f"choice::{estrutura}::{equipamento}::{condutor}::{poste}::{i}"
+                        escolha    = st.session_state["correcoes_choices"].get(key_sel, "Ignorar esta estrutura")
 
                         if escolha != "Ignorar esta estrutura":
                             eq, cond, pst = [x.strip() for x in escolha.split("|")]
                             correcoes[(estrutura, equipamento, condutor, poste)] = {
                                 "EQUIPAMENTO": eq, "CONDUTOR": cond, "POSTE": pst
                             }
-                    # após montar correções, seguimos para geração
-                elif not faltantes.empty and not submitted:
-                    st.stop()
-            else:
-                st.success("✅ Todas as combinações do projeto estão no banco de dados.")
 
-            # ------------------ Aplicar correções ------------------
+                    st.session_state["correcoes_dict"] = correcoes
+                    st.session_state["aplicar_correcoes_agora"] = True
+                    st.rerun()
+                else:
+                    # Aguarda o submit do form
+                    st.stop()
+
+            # ------------------ Aplicar correções (se houver) ------------------
+            correcoes = st.session_state.get("correcoes_dict", {})
             projeto_corrigido = projeto.copy()
+
             if correcoes:
                 for idx, row in projeto.iterrows():
                     chave = (row["ESTRUTURA"], row["EQUIPAMENTO"], row["CONDUTOR"], row["POSTE"])
@@ -192,14 +209,14 @@ if uploaded_file is not None:
                             novo["EQUIPAMENTO"], novo["CONDUTOR"], novo["POSTE"]
                         ]
 
-                # (opcional) Mostrar resumo das correções aplicadas
+                # (Opcional) Resumo das correções
                 resumo = []
-                for (est, eq, cond, pst), novo in correcoes.items():
+                for (est, eqo, cond_o, pst_o), novo in correcoes.items():
                     resumo.append({
                         "ESTRUTURA": est,
-                        "EQUIPAMENTO_ORIG": eq,
-                        "CONDUTOR_ORIG": cond,
-                        "POSTE_ORIG": pst,
+                        "EQUIPAMENTO_ORIG": eqo,
+                        "CONDUTOR_ORIG": cond_o,
+                        "POSTE_ORIG": pst_o,
                         "EQUIPAMENTO_NOVO": novo["EQUIPAMENTO"],
                         "CONDUTOR_NOVO": novo["CONDUTOR"],
                         "POSTE_NOVO": novo["POSTE"],
@@ -207,6 +224,9 @@ if uploaded_file is not None:
                 if resumo:
                     st.info("🧾 Correções aplicadas:")
                     st.dataframe(pd.DataFrame(resumo), use_container_width=True)
+
+                # Limpa o flag para próximas execuções
+                st.session_state["aplicar_correcoes_agora"] = False
 
             # ------------------ Consolidação final ------------------
             materiais_lista = []
@@ -243,6 +263,9 @@ if uploaded_file is not None:
                 )
             else:
                 st.warning("⚠️ Nenhuma estrutura válida encontrada para geração da relação.")
+
+        except Exception as e:
+            st.error(f"❌ Ocorreu um erro: {e}")
 
         except Exception as e:
             st.error(f"❌ Ocorreu um erro: {e}")
