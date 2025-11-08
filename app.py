@@ -12,7 +12,7 @@ Original file is located at
 # Interface Web Interativa (Streamlit Cloud)
 # ---------------------------------------------------------
 # Autor: Ellen Lousada / Engenharia Ceminas
-# Versão: 2025.11 (Deploy Cloud - Visual Final)
+# Versão: 2025.11 (Deploy Cloud - Correções persistentes)
 # =========================================================
 
 import streamlit as st
@@ -25,49 +25,24 @@ from io import BytesIO
 # ---------------------------------------------------------
 st.set_page_config(page_title="Ceminas - Lista de Materiais", page_icon="⚡", layout="centered")
 
-# Aplica CSS com o novo fundo azul-claro e estilos gerais
 st.markdown("""
     <style>
-        .main {
-            background-color: #E6F0FF;
-        }
-        .title {
-            text-align: center;
-            font-size: 36px;
-            font-weight: 800;
-            color: #003366;
-            margin-top: 10px;
-        }
-        .subtitle {
-            text-align: center;
-            font-size: 18px;
-            color: #333;
-            margin-bottom: 30px;
-        }
-        .stButton>button {
-            background-color: #003366;
-            color: white;
-            font-weight: bold;
-            border-radius: 8px;
-            padding: 0.6em 1.2em;
-            transition: 0.3s;
-        }
-        .stButton>button:hover {
-            background-color: #0059b3;
-            color: white;
-        }
+        .main { background-color: #E6F0FF; } /* azul claro */
+        .title { text-align: center; font-size: 36px; font-weight: 800; color: #003366; margin-top: 10px; }
+        .subtitle { text-align: center; font-size: 18px; color: #333; margin-bottom: 30px; }
+        .stButton>button { background-color: #003366; color: #fff; font-weight: 700; border-radius: 8px; padding: .6em 1.2em; }
+        .stButton>button:hover { background-color: #0059b3; color: #fff; }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # LOGOTIPO
 # ---------------------------------------------------------
-# Substitua pelo caminho exato do arquivo no repositório
 logo_path = "Logo Ceminas.jpeg"
 if os.path.exists(logo_path):
     st.image(logo_path, use_column_width=False, width=250)
 else:
-    st.warning("Logotipo não encontrado no diretório do app.")
+    st.warning("⚠️ Logotipo não encontrado no diretório do app (Logo Ceminas.jpeg).")
 
 st.markdown('<div class="title">CEMINAS – Gerador de Relação de Materiais</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Ferramenta interna para consolidação de materiais de redes de distribuição</div>', unsafe_allow_html=True)
@@ -77,15 +52,14 @@ st.divider()
 # AUTENTICAÇÃO BÁSICA (SENHA)
 # ---------------------------------------------------------
 senha_correta = "Ceminas2025"
-
 if "auth" not in st.session_state:
     st.session_state["auth"] = False
 
 if not st.session_state["auth"]:
-    senha = st.text_input("Digite a senha de acesso:", type="password")
+    senha = st.text_input("🔐 Digite a senha de acesso:", type="password")
     if senha == senha_correta:
         st.session_state["auth"] = True
-        st.success("Acesso liberado!")
+        st.success("Acesso liberado! ✅")
         st.rerun()
     else:
         st.stop()
@@ -94,22 +68,18 @@ if not st.session_state["auth"]:
 # UPLOAD DO ARQUIVO E PROCESSAMENTO
 # ---------------------------------------------------------
 st.header("📤 Enviar planilha de estruturas do projeto")
-
 uploaded_file = st.file_uploader("Envie o arquivo **EstruturasProjeto.xlsx**", type=["xlsx"])
 
 banco_estruturas = "MateriaisEstrutura.xlsx"  # Banco principal no repositório
 
 if uploaded_file is not None:
-    st.success("Arquivo recebido com sucesso!")
-
-    # Salva o arquivo temporariamente
+    st.success("✅ Arquivo recebido com sucesso!")
     projeto_path = "EstruturasProjeto.xlsx"
     with open(projeto_path, "wb") as f:
         f.write(uploaded_file.read())
 
     st.divider()
-    st.header("Configuração da Obra")
-
+    st.header("🏗️ Configuração da Obra")
     obra = st.text_input("Nome da obra:", "Nova Obra")
     obra_limpa = "".join(c for c in obra if c.isalnum() or c in (" ", "-", "_")).strip()
     arquivo_saida = f"Ceminas - Materiais - {obra_limpa}.xlsx"
@@ -118,89 +88,136 @@ if uploaded_file is not None:
 
     if gerar:
         try:
-            # -------------------------------------------------
-            # Leitura das planilhas
-            # -------------------------------------------------
+            # ------------------ Leitura e normalização ------------------
             estruturas = pd.read_excel(banco_estruturas, engine="openpyxl")
             projeto = pd.read_excel(projeto_path, engine="openpyxl")
 
-            # Padroniza colunas
             for df in [estruturas, projeto]:
                 df.columns = df.columns.str.strip().str.upper()
                 for col in df.select_dtypes(include=["object"]).columns:
                     df[col] = df[col].astype(str).str.strip().str.upper()
 
-            # Combinações existentes
-            chaves_banco = estruturas[["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]].drop_duplicates()
-            chaves_proj = projeto[["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]].drop_duplicates()
+            # ------------------ Checagem de combinações ------------------
+            keys = ["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"]
+            chaves_banco = estruturas[keys].drop_duplicates()
+            chaves_proj = projeto[keys].drop_duplicates()
 
-            # Detecta combinações não encontradas
-            faltantes = pd.merge(
-                chaves_proj, chaves_banco,
-                on=["ESTRUTURA", "EQUIPAMENTO", "CONDUTOR", "POSTE"],
-                how="left", indicator=True
-            ).query('_merge == "left_only"').drop(columns="_merge")
+            faltantes = (
+                chaves_proj.merge(chaves_banco, on=keys, how="left", indicator=True)
+                .query('_merge == "left_only"')
+                .drop(columns="_merge")
+            )
+
+            # Preparar session_state para escolhas
+            if "correcoes_choices" not in st.session_state:
+                st.session_state["correcoes_choices"] = {}
 
             correcoes = {}
 
             if not faltantes.empty:
-                st.warning(f"Foram encontradas {len(faltantes)} combinações inexistentes no banco.")
-                st.markdown("Por favor, selecione abaixo como tratar cada uma:")
+                st.warning(f"⚠️ Foram encontradas {len(faltantes)} combinações inexistentes no banco.")
+                st.markdown("Selecione abaixo como tratar cada uma:")
 
-                for i, row in faltantes.iterrows():
-                    estrutura = row["ESTRUTURA"]
-                    equipamento = row["EQUIPAMENTO"]
-                    condutor = row["CONDUTOR"]
-                    poste = row["POSTE"]
+                with st.form("corrigir_faltantes", clear_on_submit=False):
+                    for i, row in faltantes.reset_index(drop=True).iterrows():
+                        estrutura = row["ESTRUTURA"]
+                        equipamento = row["EQUIPAMENTO"]
+                        condutor = row["CONDUTOR"]
+                        poste = row["POSTE"]
 
-                    st.markdown(f"**Estrutura:** {estrutura} | **Equipamento:** {equipamento} | **Condutor:** {condutor} | **Poste:** {poste}")
+                        st.markdown(
+                            f"**❌ Estrutura:** {estrutura} | **Equipamento:** {equipamento} | **Condutor:** {condutor} | **Poste:** {poste}"
+                        )
 
-                    # Sugestões disponíveis dessa estrutura
-                    sugestoes = estruturas[estruturas["ESTRUTURA"] == estrutura][["EQUIPAMENTO", "CONDUTOR", "POSTE"]].drop_duplicates()
+                        sugestoes = (
+                            estruturas[estruturas["ESTRUTURA"] == estrutura][["EQUIPAMENTO", "CONDUTOR", "POSTE"]]
+                            .drop_duplicates()
+                            .reset_index(drop=True)
+                        )
 
-                    if sugestoes.empty:
-                        st.info("🔹 Nenhuma variação cadastrada dessa estrutura — será ignorada.")
-                        continue
+                        if sugestoes.empty:
+                            st.info("🔹 Nenhuma variação cadastrada dessa estrutura — ela será ignorada.")
+                            continue
 
-                    opcoes = [f"{r['EQUIPAMENTO']} | {r['CONDUTOR']} | {r['POSTE']}" for _, r in sugestoes.iterrows()]
-                    escolha = st.selectbox(
-                        f"Selecione uma alternativa para {estrutura}:",
-                        options=["Ignorar esta estrutura"] + opcoes,
-                        key=f"alt_{i}"
-                    )
+                        opcoes = ["Ignorar esta estrutura"] + [
+                            f"{r['EQUIPAMENTO']} | {r['CONDUTOR']} | {r['POSTE']}"
+                            for _, r in sugestoes.iterrows()
+                        ]
 
-                    if escolha != "Ignorar esta estrutura":
-                        eq, cond, pst = [x.strip() for x in escolha.split("|")]
-                        correcoes[(estrutura, equipamento, condutor, poste)] = {"EQUIPAMENTO": eq, "CONDUTOR": cond, "POSTE": pst}
-                    st.divider()
+                        key_sel = f"choice_{estrutura}_{equipamento}_{condutor}_{poste}_{i}"
+                        default_val = st.session_state["correcoes_choices"].get(key_sel, opcoes[0])
 
-                aplicar = st.button("Aplicar Correções e Gerar Relação")
+                        escolha = st.selectbox(
+                            f"Selecione uma alternativa para {estrutura}:",
+                            options=opcoes,
+                            key=key_sel,
+                            index=opcoes.index(default_val) if default_val in opcoes else 0,
+                        )
 
-                if not aplicar:
+                        # Persistir a escolha no estado
+                        st.session_state["correcoes_choices"][key_sel] = escolha
+                        st.divider()
+
+                    submitted = st.form_submit_button("✅ Aplicar Correções e Gerar Relação")
+
+                # Se o formulário foi submetido, montar o dicionário de correções
+                if not faltantes.empty and submitted:
+                    for i, row in faltantes.reset_index(drop=True).iterrows():
+                        estrutura = row["ESTRUTURA"]
+                        equipamento = row["EQUIPAMENTO"]
+                        condutor = row["CONDUTOR"]
+                        poste = row["POSTE"]
+                        key_sel = f"choice_{estrutura}_{equipamento}_{condutor}_{poste}_{i}"
+                        escolha = st.session_state["correcoes_choices"].get(key_sel, "Ignorar esta estrutura")
+
+                        if escolha != "Ignorar esta estrutura":
+                            eq, cond, pst = [x.strip() for x in escolha.split("|")]
+                            correcoes[(estrutura, equipamento, condutor, poste)] = {
+                                "EQUIPAMENTO": eq, "CONDUTOR": cond, "POSTE": pst
+                            }
+                    # após montar correções, seguimos para geração
+                elif not faltantes.empty and not submitted:
                     st.stop()
             else:
-                st.success("Todas as combinações do projeto estão no banco de dados.")
+                st.success("✅ Todas as combinações do projeto estão no banco de dados.")
 
-            # Aplica correções ao projeto
+            # ------------------ Aplicar correções ------------------
             projeto_corrigido = projeto.copy()
-            for idx, row in projeto.iterrows():
-                chave = (row["ESTRUTURA"], row["EQUIPAMENTO"], row["CONDUTOR"], row["POSTE"])
-                if chave in correcoes:
-                    novo = correcoes[chave]
-                    projeto_corrigido.loc[idx, ["EQUIPAMENTO", "CONDUTOR", "POSTE"]] = [
-                        novo["EQUIPAMENTO"], novo["CONDUTOR"], novo["POSTE"]
-                    ]
+            if correcoes:
+                for idx, row in projeto.iterrows():
+                    chave = (row["ESTRUTURA"], row["EQUIPAMENTO"], row["CONDUTOR"], row["POSTE"])
+                    if chave in correcoes:
+                        novo = correcoes[chave]
+                        projeto_corrigido.loc[idx, ["EQUIPAMENTO", "CONDUTOR", "POSTE"]] = [
+                            novo["EQUIPAMENTO"], novo["CONDUTOR"], novo["POSTE"]
+                        ]
 
-            # --- Consolidação final ---
+                # (opcional) Mostrar resumo das correções aplicadas
+                resumo = []
+                for (est, eq, cond, pst), novo in correcoes.items():
+                    resumo.append({
+                        "ESTRUTURA": est,
+                        "EQUIPAMENTO_ORIG": eq,
+                        "CONDUTOR_ORIG": cond,
+                        "POSTE_ORIG": pst,
+                        "EQUIPAMENTO_NOVO": novo["EQUIPAMENTO"],
+                        "CONDUTOR_NOVO": novo["CONDUTOR"],
+                        "POSTE_NOVO": novo["POSTE"],
+                    })
+                if resumo:
+                    st.info("🧾 Correções aplicadas:")
+                    st.dataframe(pd.DataFrame(resumo), use_container_width=True)
+
+            # ------------------ Consolidação final ------------------
             materiais_lista = []
             for _, row in projeto_corrigido.iterrows():
-                filtro = (
+                flt = (
                     (estruturas["ESTRUTURA"] == row["ESTRUTURA"]) &
                     (estruturas["EQUIPAMENTO"] == row["EQUIPAMENTO"]) &
                     (estruturas["CONDUTOR"] == row["CONDUTOR"]) &
                     (estruturas["POSTE"] == row["POSTE"])
                 )
-                encontrados = estruturas.loc[filtro].copy()
+                encontrados = estruturas.loc[flt].copy()
                 if not encontrados.empty:
                     encontrados["QTD_PROJETO"] = row["QUANTIDADE"]
                     materiais_lista.append(encontrados)
@@ -215,18 +232,17 @@ if uploaded_file is not None:
                     .sort_values("DESCRIÇÃO")
                 )
 
-                # Download final
                 buffer = BytesIO()
                 relacao.to_excel(buffer, index=False)
-                st.success(f"Relação consolidada gerada com sucesso para {obra}")
+                st.success(f"✅ Relação consolidada gerada com sucesso para {obra}")
                 st.download_button(
-                    label="Baixar planilha gerada",
+                    label="📥 Baixar planilha gerada",
                     data=buffer.getvalue(),
-                    file_name=f"Ceminas - Materiais - {obra_limpa}.xlsx",
+                    file_name=arquivo_saida,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                st.warning("Nenhuma estrutura válida encontrada para geração da relação.")
+                st.warning("⚠️ Nenhuma estrutura válida encontrada para geração da relação.")
 
         except Exception as e:
-            st.error(f"Ocorreu um erro: {e}")
+            st.error(f"❌ Ocorreu um erro: {e}")
