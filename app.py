@@ -15,6 +15,7 @@ Original file is located at
 # =========================================================
 
 import streamlit as st
+st.write("✅ App inicializado com sucesso (debug checkpoint 1)")
 import pandas as pd
 import os
 from io import BytesIO
